@@ -9,6 +9,7 @@ Como funciona?
 Ligação
 
 Esta biblioteca usa SDMMC_SLOT_1 com PULL-UPs internos. Você pode precisar colocar pull-ups externos.
+
 •	CMD = GPIO_NUM_15.
 •	CLK = GPIO_NUM_14.
 •	D0 = GPIO_NUM_2.
