@@ -105,7 +105,7 @@ void vTask1(void *pvParameters)
     while (1)
     {
       led_status = !led_status;
-	    //gpio_set_level( LED_1 ,led_status ); 
+      //gpio_set_level( LED_1 ,led_status ); 
       vTaskDelay( 400/portTICK_PERIOD_MS );
     }
 }
@@ -309,15 +309,13 @@ void app_main( void )
     gpio_set_direction(LED_1, GPIO_MODE_OUTPUT );
     gpio_pad_select_gpio(INPUT_CD);
     gpio_set_direction(INPUT_CD, GPIO_MODE_INPUT);
-   	gpio_set_pull_mode(INPUT_CD, GPIO_PULLUP_ONLY);
-	  gpio_set_intr_type(INPUT_CD, GPIO_INTR_NEGEDGE);
+    gpio_set_pull_mode(INPUT_CD, GPIO_PULLUP_ONLY);
+    gpio_set_intr_type(INPUT_CD, GPIO_INTR_NEGEDGE);
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-	  gpio_isr_handler_add(INPUT_CD, gpio_isr_handler, NULL);
-    /**
-     * Cria a task responsável em interver o estado do led building;
-     */
-	  xTaskCreate(vTask1,"TASK1",configMINIMAL_STACK_SIZE,NULL,3,&task1Handle); 
-	  xTaskCreate(vCd_card_task, "cd_card_task", 4096, NULL , 5,&ISR );
+    gpio_isr_handler_add(INPUT_CD, gpio_isr_handler, NULL);
+	
+    xTaskCreate(vTask1,"TASK1",configMINIMAL_STACK_SIZE,NULL,3,&task1Handle); //Programa principal
+    xTaskCreate(vCd_card_task, "cd_card_task", 4096, NULL , 5,&ISR ); //interupção do SDcard Switch
 
  }
 	
