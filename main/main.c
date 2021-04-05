@@ -57,9 +57,8 @@ int version = 1;
  * Protótipos
  */
 void app_main( void );
-void vTask1(void *pvParameters);
-void read_sd_card(void);
-//int8_t init(const char *file_path, const char *base_path);
+void vTask1(void *pvParameters); //Código Principal
+void read_sd_card(void); //Função de leitura e verificação do firmware no Sd card
 void decrypt(uint8_t *data, uint16_t size);
 void crypto(const char *key, const char *iv);
 void download(void);
