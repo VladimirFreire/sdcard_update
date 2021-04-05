@@ -44,7 +44,7 @@ static const char * TAG = "OS v1.0";
 #define LED_1 	     2  
 #define INPUT_CD	 0      //simula o sinal CD do sdcard no botão da placa
 #define ESP_INTR_FLAG_DEFAULT 0
-#define MOUNT_POINT "/sdcard"
+
 
 int8_t _cry = 0;
 uint8_t _firstiv[16] = {0};
