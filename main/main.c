@@ -68,7 +68,6 @@ void init(void);
  * Variáveis Globais
  */
 TaskHandle_t task1Handle = NULL;  /** Handle principal, Blink */ 
-TaskHandle_t task2Handle = NULL;  /** Handle conta o tempo e reinicia o Blink */
 TaskHandle_t ISR = NULL;          /** Handle interrupção  */
 bool flag = false;
 
