@@ -124,7 +124,7 @@ void vTask1(void *pvParameters)
     while (1)
     {
       led_status = !led_status;
-	  gpio_set_level( LED_1 ,led_status ); 
+      //gpio_set_level( LED_1 ,led_status ); 
       vTaskDelay( 400/portTICK_PERIOD_MS );
     }
 }
