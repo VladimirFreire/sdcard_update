@@ -32,10 +32,22 @@
 #include <esp_task_wdt.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/aes.h>
+#include "nvs.h"
+#include "nvs_flash.h"
+
+#define EXAMPLE_FILENAME CONFIG_EXAMPLE_FILENAME
+#define BUFFSIZE 1024
+#define TEXT_BUFFSIZE 1024
+
+/*um buffer de gravação de dados OTA pronto para gravar no flash*/
+static char ota_write_data[BUFFSIZE + 1] = { 0 };
+/*um buffer de recepção de pacotes*/
+static char text[BUFFSIZE + 1] = { 0 };
+/* comprimento total de uma imagem*/
+static int binary_file_length = 0;
 
 
-static const char * TAG = "OS v1.0";
-
+static const char *TAG = "OS v1.0";
 
 #define MOUNT_POINT "/sdcard"
 #define TRUE         1 
@@ -44,7 +56,7 @@ static const char * TAG = "OS v1.0";
 #define LED_1 	     2  
 #define INPUT_CD	 0      //simula o sinal CD do sdcard no botão da placa
 #define ESP_INTR_FLAG_DEFAULT 0
-
+#define MOUNT_POINT "/sdcard"
 
 int8_t _cry = 0;
 uint8_t _firstiv[16] = {0};
@@ -53,12 +65,18 @@ mbedtls_aes_context aes;
 FILE *f;
 int version = 1;   
 
+// server certificates
+extern const char server_cert_pem_start[] asm("_binary_certs_pem_start");
+extern const char server_cert_pem_end[] asm("_binary_certs_pem_end");
+
 /**
  * Protótipos
  */
 void app_main( void );
-void vTask1(void *pvParameters); //Código Principal
-void read_sd_card(void); //Função de leitura e verificação do firmware no Sd card
+void vTask1(void *pvParameters);
+void ota_update(void);
+void read_sd_card(void);
+//int8_t init(const char *file_path, const char *base_path);
 void decrypt(uint8_t *data, uint16_t size);
 void crypto(const char *key, const char *iv);
 void download(void);
@@ -68,6 +86,7 @@ void init(void);
  * Variáveis Globais
  */
 TaskHandle_t task1Handle = NULL;  /** Handle principal, Blink */ 
+TaskHandle_t task2Handle = NULL;  /** Handle conta o tempo e reinicia o Blink */
 TaskHandle_t ISR = NULL;          /** Handle interrupção  */
 bool flag = false;
 
@@ -100,15 +119,16 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
 
 void vTask1(void *pvParameters)
 {    
-    bool led_status = false;
+    bool led_status = true;
      
     while (1)
     {
       led_status = !led_status;
-      //gpio_set_level( LED_1 ,led_status ); 
+	  gpio_set_level( LED_1 ,led_status ); 
       vTaskDelay( 400/portTICK_PERIOD_MS );
     }
 }
+
 
 // Decofica o arquivo bin
 void decrypt(uint8_t *data, uint16_t size)
@@ -291,13 +311,66 @@ void read_sd_card (void)
      if (n>version){
         ESP_LOGI(TAG, "Versao do firmware encontrado '%s'", line);
         const esp_partition_t* partition = esp_ota_get_running_partition();
-        printf("Partition: %s\n", partition->label);
-        download();
+        printf("Partição em uso: %s\n", partition->label);
+        ota_update();
        
      }
     esp_vfs_fat_sdcard_unmount(mount_point, card);
     ESP_LOGI(TAG, "Card desmontado sem atualização");
  }
+
+void ota_update(void)
+{
+    esp_err_t err;
+    /* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
+    esp_ota_handle_t update_handle = 0 ;
+    const esp_partition_t *update_partition = NULL;
+
+    ESP_LOGI(TAG, "Iniciando atualização OTA ...");
+
+    const esp_partition_t *configured = esp_ota_get_boot_partition();
+    const esp_partition_t *running = esp_ota_get_running_partition();
+
+    if (configured != running) {
+        ESP_LOGW(TAG, "Partição de inicialização OTA configurada no deslocamento 0x%08x, mas executando a partir do deslocamento 0x%08x",
+                 configured->address, running->address);
+        ESP_LOGW(TAG, "(Isso pode acontecer se os dados de inicialização OTA ou a imagem de inicialização preferida forem corrompidos de alguma forma.)");
+    }
+    ESP_LOGI(TAG, "Partição em execução tipo %d subtipo %d (deslocamento 0x%08x)",
+             running->type, running->subtype, running->address);
+
+    update_partition = esp_ota_get_next_update_partition(NULL);
+
+    ESP_LOGI(TAG, "Gravando no subtipo de partição %d no deslocamento 0x%x",
+             update_partition->subtype, update_partition->address);
+    assert(update_partition != NULL);
+
+    err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin falhou, error=%d", err);
+        //task_fatal_error();
+    }
+    ESP_LOGI(TAG, "esp_ota_begin com sucesso!");
+
+    bool resp_body_start = false, flag = true;
+    
+
+    ESP_LOGI(TAG, "Total Write binary data length : %d", binary_file_length);
+
+    if (esp_ota_end(update_handle) != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed!");
+        //task_fatal_error();
+    }
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed! err=0x%x", err);
+       // task_fatal_error();
+    }
+    ESP_LOGI(TAG, "Prepare to restart system!");
+    esp_restart();
+    return ;
+}
+
 /**
  * Função Principal da Aplicação;
  * Chamada logo após a execução do bootloader do ESP32;
@@ -305,17 +378,29 @@ void read_sd_card (void)
 void app_main( void )
 
 {	  
-    gpio_pad_select_gpio(LED_1);
-    gpio_set_direction(LED_1, GPIO_MODE_OUTPUT );
-    gpio_pad_select_gpio(INPUT_CD);
-    gpio_set_direction(INPUT_CD, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(INPUT_CD, GPIO_PULLUP_ONLY);
-    gpio_set_intr_type(INPUT_CD, GPIO_INTR_NEGEDGE);
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    gpio_isr_handler_add(INPUT_CD, gpio_isr_handler, NULL);
-	
-    xTaskCreate(vTask1,"TASK1",configMINIMAL_STACK_SIZE,NULL,3,&task1Handle); //Programa principal
-    xTaskCreate(vCd_card_task, "cd_card_task", 4096, NULL , 5,&ISR ); //interupção do SDcard Switch
+   gpio_pad_select_gpio(LED_1);
+   gpio_set_direction(LED_1, GPIO_MODE_OUTPUT );
+   gpio_pad_select_gpio(INPUT_CD);
+   gpio_set_direction(INPUT_CD, GPIO_MODE_INPUT);
+   gpio_set_pull_mode(INPUT_CD, GPIO_PULLUP_ONLY);
+   gpio_set_intr_type(INPUT_CD, GPIO_INTR_NEGEDGE);
+   gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+   gpio_isr_handler_add(INPUT_CD, gpio_isr_handler, NULL);
+   // Initialize NVS.
+   esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES) {
+        // A tabela de partição do aplicativo OTA tem um tamanho de partição NVS menor do que o não OTA
+        // tabela de partição. Esta incompatibilidade de tamanho pode causar falha na inicialização do NVS.
+        // Se isso acontecer, apagamos a partição NVS e inicializamos o NVS novamente.
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( err );
+    
+	xTaskCreate(vTask1,"TASK1",configMINIMAL_STACK_SIZE,NULL,1,&task1Handle); 
+	xTaskCreate(vCd_card_task, "cd_card_task", 4096, NULL , 5,&ISR );
 
  }
+	
+
 	
